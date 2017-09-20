@@ -1,0 +1,300 @@
+---
+title: 'Compare the Speech of Three Recent President Part 2'
+output:
+  html_document: default
+  html_notebook: default
+---
+
+# Step 0: check and install needed packages. Load the libraries and functions. 
+
+```{r, message=FALSE, warning=FALSE}
+setwd('/Users/bxin66/Dropbox/Columbia/Class3/5243/wk2-TextMining/doc')
+library("rvest")
+library("tibble")
+#library("qdap")
+library("sentimentr")
+library("gplots")
+library("dplyr")
+library("syuzhet")
+library("factoextra")
+library("beeswarm")
+library("scales")
+library("RColorBrewer")
+library("RANN")
+library("tm")
+library("topicmodels")
+source("../lib/plotstacked.R")
+source("../lib/speechFuncs.R")
+```
+
+# Step 4: data Processing --- generate list of sentences
+
+We will use sentences as units of analysis for this project, as sentences are natural languge units for organizing thoughts and ideas. For each extracted sentence, we apply sentiment analysis using [NRC sentiment lexion](http://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm). "The NRC Emotion Lexicon is a list of English words and their associations with eight basic emotions (anger, fear, anticipation, trust, surprise, sadness, joy, and disgust) and two sentiments (negative and positive). The annotations were manually done by crowdsourcing."
+
+We assign an sequential id to each sentence in a speech (`sent.id`) and also calculated the number of words in each sentence as *sentence length* (`word.count`).
+
+
+## load sentence.list to the disk
+```{r}
+sentence.list  =read.csv("../doc/mySentenceList.csv")
+sel.comparison=c("DonaldJTrump", "GeorgeWBush","BarackObama")
+sentence.list=sentence.list%>%filter(!is.na(word.count))
+sentence.list2 = sentence.list[,c("word.count","File")]
+data1=sentence.list2%>%filter(File =="GeorgeWBush")
+data2=sentence.list2%>%filter(File =="BarackObama")
+data3=sentence.list2%>%filter(File =="DonaldJTrump")
+
+
+ggplot(data1,aes(x=data1$word.count))  +
+    geom_histogram(data=data1,fill = "red", alpha = 0.2,binwidth=5) 
+
+ggplot(data2,aes(x=data2$word.count))  +
+   geom_histogram(data=data2,fill = "blue", alpha = 0.2,binwidth=5) 
+  
+ggplot(data3,aes(x=data3$word.count))  +
+    geom_histogram(data=data3,fill = "green", alpha = 0.2,binwidth = 5)
+```
+
+From the histogram we can see the distribution of blue color and green color have almost the same shape. The red color has less word in each sentence. However, in general, they have the same length. 
+
+
+
+# Step 5: Data analysis --- Topic modeling
+
+For topic modeling, we prepare a corpus of sentence snipets as follows. For each speech, we start with sentences and prepare a snipet with a given sentence with the flanking sentences. 
+#### according to word counts, create four word clouds one for each selected president and one for them. 
+```{r,warning=FALSE, message=FALSE}
+corpus.list=sentence.list[2:(nrow(sentence.list)-1), ]
+sentence.pre=sentence.list$sentences[1:(nrow(sentence.list)-2)]
+sentence.post=sentence.list$sentences[3:(nrow(sentence.list)-1)]
+corpus.list$snipets=paste(sentence.pre, corpus.list$sentences, sentence.post, sep=" ")
+rm.rows=(1:nrow(corpus.list))[corpus.list$sent.id==1]
+rm.rows=c(rm.rows, rm.rows-1)
+
+corpus.list=corpus.list[-rm.rows, ]
+docs <- Corpus(VectorSource(corpus.list$snipets))
+docs <-tm_map(docs,content_transformer(tolower))
+docs <- tm_map(docs, removePunctuation)
+docs <- tm_map(docs, removeNumbers)
+docs <- tm_map(docs, removeWords, stopwords("english"))
+docs <- tm_map(docs, stripWhitespace)
+docs <- tm_map(docs,stemDocument)
+
+library(wordcloud)
+library(RColorBrewer)
+dtm <- TermDocumentMatrix(docs)
+m <- as.matrix(dtm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+
+docs1 <- Corpus(VectorSource(corpus.list%>%filter(File =="GeorgeWBush")%>%select(snipets)))
+docs1 <-tm_map(docs1,content_transformer(tolower))
+docs1 <- tm_map(docs1, removePunctuation)
+docs1 <- tm_map(docs1, removeNumbers)
+docs1 <- tm_map(docs1, removeWords, stopwords("english"))
+docs1 <- tm_map(docs1, stripWhitespace)
+docs1 <- tm_map(docs1,stemDocument)
+dtm1 <- TermDocumentMatrix(docs1)
+m1 <- as.matrix(dtm1)
+v1<- sort(rowSums(m1),decreasing=TRUE)
+d1 <- data.frame(word = names(v1),freq=v1)
+
+
+docs2 <- Corpus(VectorSource(corpus.list%>%filter(File =="BarackObama")%>%select(snipets)))
+docs2 <-tm_map(docs2,content_transformer(tolower))
+docs2 <- tm_map(docs2, removePunctuation)
+docs2 <- tm_map(docs2, removeNumbers)
+docs2 <- tm_map(docs2, removeWords, stopwords("english"))
+docs <- tm_map(docs2, stripWhitespace)
+docs2 <- tm_map(docs2,stemDocument)
+dtm2 <- TermDocumentMatrix(docs2)
+m2 <- as.matrix(dtm2)
+v2<- sort(rowSums(m2),decreasing=TRUE)
+d2 <- data.frame(word = names(v2),freq=v2)
+
+
+docs3 <- Corpus(VectorSource(corpus.list%>%filter(File =="DonaldJTrump")%>%select(snipets)))
+docs3 <-tm_map(docs3,content_transformer(tolower))
+docs3 <- tm_map(docs3, removePunctuation)
+docs3 <- tm_map(docs3, removeNumbers)
+docs3 <- tm_map(docs3, removeWords, stopwords("english"))
+docs3 <- tm_map(docs3, stripWhitespace)
+docs3 <- tm_map(docs3,stemDocument)
+dtm3 <- TermDocumentMatrix(docs3)
+m3 <- as.matrix(dtm3)
+v3<- sort(rowSums(m3),decreasing=TRUE)
+d3 <- data.frame(word = names(v3),freq=v3)
+
+par(mfrow=c(1,4))
+wordcloud(words = d$word, freq = d$freq, min.freq = 20,max.words=100, random.order=FALSE, colors=brewer.pal(18, "Dark2"))
+wordcloud(words = d1$word, freq = d1$freq, min.freq = 20,max.words=100, random.order=FALSE, colors=brewer.pal(18, "Dark2"))
+wordcloud(words = d2$word, freq = d2$freq, min.freq = 20,max.words=100, random.order=FALSE, colors=brewer.pal(18, "Dark2"))
+wordcloud(words = d3$word, freq = d3$freq, min.freq = 20,max.words=100, random.order=FALSE, colors=brewer.pal(18, "Dark2"))
+
+```
+
+From the output graph we can see they use similar words. According to common sense, we can say the words they use in their speech is the topic (key words) people care most about. They have been selected as president, people still care about the similiar things as 20 years ago. 
+
+
+### Topic modeling
+
+Gengerate document-term matrices. 
+
+
+```{r}
+corpus.list=sentence.list[2:(nrow(sentence.list)-1), ]
+sentence.pre=sentence.list$sentences[1:(nrow(sentence.list)-2)]
+sentence.post=sentence.list$sentences[3:(nrow(sentence.list)-1)]
+corpus.list$snipets=paste(sentence.pre, corpus.list$sentences, sentence.post, sep=" ")
+rm.rows=(1:nrow(corpus.list))[corpus.list$sent.id==1]
+rm.rows=c(rm.rows, rm.rows-1)
+
+corpus.list=corpus.list[-rm.rows, ]
+docs <- Corpus(VectorSource(corpus.list$snipets))
+docs <-tm_map(docs,content_transformer(tolower))
+docs <- tm_map(docs, removePunctuation)
+docs <- tm_map(docs, removeNumbers)
+docs <- tm_map(docs, removeWords, stopwords("english"))
+docs <- tm_map(docs, stripWhitespace)
+docs <- tm_map(docs,stemDocument)
+dtm <- DocumentTermMatrix(docs)
+#convert rownames to filenames#convert rownames to filenames
+rownames(dtm) <- paste(corpus.list$type, corpus.list$File,
+                       corpus.list$Term, corpus.list$sent.id, sep="_")
+rowTotals <- apply(dtm , 1, sum) #Find the sum of words in each Document
+dtm  <- dtm[rowTotals> 0, ]
+corpus.list=corpus.list[rowTotals>0, ]
+```
+
+
+Run LDA
+
+
+```{r}
+#Set parameters for Gibbs sampling
+burnin <- 4000
+iter <- 2000
+thin <- 500
+seed <-list(2003,5,63,100001,765)
+nstart <- 5
+best <- TRUE
+
+#Number of topics
+k <- 15
+
+#Run LDA using Gibbs sampling
+ldaOut <-LDA(dtm, k, method="Gibbs", control=list(nstart=nstart, 
+                                                 seed = seed, best=best,
+                                                 burnin = burnin, iter = iter, 
+                                                 thin=thin))
+#write out results
+#docs to topics
+ldaOut.topics <- as.matrix(topics(ldaOut))
+table(c(1:k, ldaOut.topics))
+write.csv(ldaOut.topics,file=paste("../out/LDAGibbs",k,"DocsToTopics.csv"))
+
+#top 6 terms in each topic
+ldaOut.terms <- as.matrix(terms(ldaOut,20))
+write.csv(ldaOut.terms,file=paste("../out/LDAGibbs",k,"TopicsToTerms.csv"))
+
+#probabilities associated with each topic assignment
+topicProbabilities <- as.data.frame(ldaOut@gamma)
+write.csv(topicProbabilities,file=paste("../out/LDAGibbs",k,"TopicProbabilities.csv"))
+```
+
+
+
+```{r}
+terms.beta=ldaOut@beta
+terms.beta=scale(terms.beta)
+topics.terms=NULL
+for(i in 1:k){
+  topics.terms=rbind(topics.terms, ldaOut@terms[order(terms.beta[i,], decreasing = TRUE)[1:7]])
+}
+topics.terms
+ldaOut.terms
+```
+
+Based on the most popular terms and the most salient terms for each topic, we assign a hashtag to each topic. This part require manual setup as the topics are likely to change. 
+
+
+```{r}
+topics.hash=c("Economy", "America", "Defense", "Belief", "Election", "Patriotism", "Unity", "Government", "Reform", "Temporal", "WorkingFamilies", "Freedom", "Equality", "Misc", "Legislation")
+corpus.list$ldatopic=as.vector(ldaOut.topics)
+corpus.list$ldahash=topics.hash[ldaOut.topics]
+
+colnames(topicProbabilities)=topics.hash
+corpus.list.df=cbind(corpus.list, topicProbabilities)
+```
+
+Eeach topic has it own keywords, based on the keywords shown in each topic, we can summerize each topic. Some of they may not be cleary but they are good summary compared to random guess.  
+
+## Clustering of topics
+```{r, fig.width=3, fig.height=4}
+par(mar=c(1,1,1,1))
+topic.summary=tbl_df(corpus.list.df)%>%
+              filter(type%in%c("nomin", "inaug"), File%in%sel.comparison)%>%
+              select(File, Economy:Legislation)%>%
+              group_by(File)%>%
+              summarise_each(funs(mean))
+topic.summary=as.data.frame(topic.summary)
+rownames(topic.summary)=topic.summary[,1]
+
+topic.plot=c(1, 13, 9, 11, 8, 3, 7)
+print(topics.hash[topic.plot])
+
+heatmap.2(as.matrix(topic.summary[,topic.plot+1]), 
+          scale = "column", key=F, 
+          col = bluered(100),
+          cexRow = 0.9, cexCol = 0.9, margins = c(8, 8),
+          trace = "none", density.info = "none")
+```
+
+
+
+
+```{r, fig.width=3.3, fig.height=5}
+# [1] "Economy"         "America"         "Defense"         "Belief"         
+# [5] "Election"        "Patriotism"      "Unity"           "Government"     
+# [9] "Reform"          "Temporal"        "WorkingFamilies" "Freedom"        
+# [13] "Equality"        "Misc"            "Legislation"       
+ 
+
+par(mfrow=c(3, 1), mar=c(1,1,2,0), bty="n", xaxt="n", yaxt="n")
+
+topic.plot=c(1, 13, 14, 15, 8, 9, 12)
+print(topics.hash[topic.plot])
+
+
+speech.df=tbl_df(corpus.list.df)%>%filter(File=="GeorgeWBush", type=="nomin", Term==1)%>%select(sent.id, Economy:Legislation)
+speech.df=as.matrix(speech.df)
+speech.df[,-1]=replace(speech.df[,-1], speech.df[,-1]<1/15, 0.001)
+plot.stacked(speech.df[,1], speech.df[,topic.plot+1], 
+            xlab="Sentences", ylab="Topic share", main="George W Bush, Nomination")
+
+speech.df=tbl_df(corpus.list.df)%>%filter(File=="BarackObama", type=="nomin", Term==1)%>%select(sent.id, Economy:Legislation)
+speech.df=as.matrix(speech.df)
+speech.df[,-1]=replace(speech.df[,-1], speech.df[,-1]<1/15, 0.001)
+plot.stacked(speech.df[,1], speech.df[,topic.plot+1],
+            xlab="Sentences", ylab="Topic share", main="Barack Obama, Nomination")
+
+
+
+speech.df=tbl_df(corpus.list.df)%>%filter(File=="DonaldJTrump", type=="nomin")%>%select(sent.id, Economy:Legislation)
+speech.df=as.matrix(speech.df)
+speech.df[,-1]=replace(speech.df[,-1], speech.df[,-1]<1/15, 0.001)
+plot.stacked(speech.df[,1], speech.df[,topic.plot+1],
+            xlab="Sentences", ylab="Topic share", main="Donald Trump, Nomination")
+
+```
+
+
+
+```{r}
+speech.df=tbl_df(corpus.list.df)%>%filter(type=="nomin", word.count<20)%>%select(sentences, Economy:Legislation)
+names(speech.df)[-1]
+```
+
+
+Conclusion: George W Bush talked on Economics than the other two. Or we can say during George W Bush election, people care Economy the most. Barack Obama emphisized more on legislations than the other two. Not a big surprise. Obama care and medicare are well known since 2010. Donald Trump said government a lot. Build a wall along Mexico board, constructions, high way system are sll supported by government.
+Presidents are selected, no matter who is selected, he or she can represent the political and social culture during that time. Hence, his or her topic can also represent what people care the most. 

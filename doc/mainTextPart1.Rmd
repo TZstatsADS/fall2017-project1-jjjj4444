@@ -1,0 +1,151 @@
+---
+title: "Compare the Speech of Three Recent President Part 1"
+---
+
+# Step 0: check and install needed packages. Load the libraries and functions. 
+
+```{r, message=FALSE, warning=FALSE}
+setwd('/Users/bxin66/Dropbox/Columbia/Class3/5243/wk2-TextMining/doc')
+# load packages
+library("rvest")
+library("tibble")
+#library("qdap")
+library("sentimentr")
+library("gplots")
+library("dplyr")
+library("tm")
+library("syuzhet")
+library("factoextra")
+library("beeswarm")
+library("scales")
+library("RColorBrewer")
+library("RANN")
+library("tm")
+library("topicmodels")
+
+source("../lib/plotstacked.R")
+source("../lib/speechFuncs.R")
+```
+
+
+# Step 1: Data harvest: scrap speech URLs from <http://www.presidency.ucsb.edu/>.
+
+Following the example of [Jerid Francom](http://francojc.github.io/web-scraping-with-rvest/), we used [Selectorgadget](http://selectorgadget.com/) to choose the links we would like to scrap. For this project, we selected all inaugural addresses of past presidents, nomination speeches of major party candidates and farewell addresses. We also included several public speeches from Donald Trump for our textual analysis of presidential speeches. 
+
+```{r, message=FALSE, warning=FALSE}
+main.page <- read_html(x = "http://www.presidency.ucsb.edu/inaugurals.php")
+inaug=f.speechlinks(main.page)
+as.Date(inaug[,1], format="%B %e, %Y") 
+inaug=inaug[-nrow(inaug),] # remove the last line, irrelevant due to error.
+
+main.page=read_html("http://www.presidency.ucsb.edu/nomination.php")
+nomin <- f.speechlinks(main.page)
+main.page=read_html("http://www.presidency.ucsb.edu/farewell_addresses.php")
+farewell <- f.speechlinks(main.page)
+```
+
+
+```{r}
+inaug.list=read.csv("../data/inauglist.csv", stringsAsFactors = FALSE)
+#inaug.list=inaug.list[,c(-6)]
+nomin.list=read.csv("../data/nominlist.csv", stringsAsFactors = FALSE)
+#nomin.list=nomin.list[,c(-6)]
+farewell.list=read.csv("../data/farewelllist.csv", stringsAsFactors = FALSE)
+#farewell.list =farewell.list[,c(-6)]
+```
+
+We assemble all scrapped speeches into one list. Note here that we don't have the full text yet, only the links to full text transcripts. 
+
+
+```{r}
+speech.list=rbind(inaug.list, nomin.list, farewell.list)
+speech.list$type=c(rep("inaug", nrow(inaug.list)),
+                   rep("nomin", nrow(nomin.list)),
+                   rep("farewell", nrow(farewell.list)))
+nomin = nomin[-47,]
+speech.url=rbind(inaug, nomin, farewell)
+speech.list=cbind(speech.list, speech.url)
+```
+
+Based on the list of speeches, we scrap the main text part of the transcript's html page. For simple html pages of this kind,  [Selectorgadget](http://selectorgadget.com/) is very convenient for identifying the html node that `rvest` can use to scrap its content. For reproducibility, we also save our scrapped speeches into our local folder as individual speech files. 
+
+```{r}
+# Loop over each row in speech.list
+speech.list$fulltext=NA
+for(i in seq(nrow(speech.list))) {
+  text <- read_html(speech.list$urls[i]) %>% # load the page
+    html_nodes(".displaytext") %>% # isloate the text
+    html_text() # get the text
+  speech.list$fulltext[i]=text
+  # Create the file name
+  filename <- paste0("../data/fulltext/", 
+                     speech.list$type[i],
+                     speech.list$File[i], "-", 
+                     speech.list$Term[i], ".txt")
+  sink(file = filename) %>% # open file to write 
+  cat(text)  # write the file
+  sink() # close the file
+}
+```
+
+
+Trump, as president-elect that has not been a politician, do not have a lot of formal speeches yet. For our textual analysis, we manually add several public transcripts from Trump:
++ [Transcript: Donald Trump's full immigration speech, annotated. LA Times, 08/31/2016] (http://www.latimes.com/politics/la-na-pol-donald-trump-immigration-speech-transcript-20160831-snap-htmlstory.html)
++ [Transcript of Donald Trump’s speech on national security in Philadelphia
+- The Hill, 09/07/16](http://thehill.com/blogs/pundits-blog/campaign/294817-transcript-of-donald-trumps-speech-on-national-security-in)
++ [Transcript of President-elect Trump's news conference
+CNBC, 01/11/2017](http://www.cnbc.com/2017/01/11/transcript-of-president-elect-donald-j-trumps-news-conference.html)
+
+```{r}
+speech1=paste(readLines("../data/fulltext/SpeechDonaldTrump-NA.txt", n=-1, skipNul=TRUE),collapse=" ")
+speech2=paste(readLines("../data/fulltext/SpeechDonaldTrump-NA2.txt", n=-1, skipNul=TRUE),collapse=" ")
+speech3=paste(readLines("../data/fulltext/PressDonaldTrump-NA.txt", n=-1, skipNul=TRUE),collapse=" ")
+```
+
+Trump.speeches=data.frame(
+  President=rep("Donald J. Trump", 3),
+  File=rep("DonaldJTrump", 3),
+  Term=rep(0, 3),
+  Party=rep("Republican", 3),
+  Date=c("August 31, 2016", "September 7, 2016", "January 11, 2017"),
+  Words=c(word_count(speech1), word_count(speech2), word_count(speech3)),
+  Win=rep("yes", 3),
+  type=rep("speeches", 3),
+  links=rep(NA, 3),
+  urls=rep(NA, 3),
+  fulltext=c(speech1, speech2, speech3)
+)
+
+speech.list=rbind(speech.list, Trump.speeches)
+
+
+# Step 4: data Processing --- generate list of sentences
+
+We will use sentences as units of analysis for this project, as sentences are natural languge units for organizing thoughts and ideas. For each extracted sentence, we apply sentiment analysis using [NRC sentiment lexion](http://saifmohammad.com/WebPages/NRC-Emotion-Lexicon.htm). "The NRC Emotion Lexicon is a list of English words and their associations with eight basic emotions (anger, fear, anticipation, trust, surprise, sadness, joy, and disgust) and two sentiments (negative and positive). The annotations were manually done by crowdsourcing."
+
+We assign an sequential id to each sentence in a speech (`sent.id`) and also calculated the number of words in each sentence as *sentence length* (`word.count`).
+
+
+sel.comparison=c("DonaldJTrump", "GeorgeWBush","BarackObama")
+speech.list.in=speech.list[speech.list$File%in% sel.comparison,]
+
+sentence.list=NULL
+for(i in 1:nrow(speech.list.in)){
+  sentences=sent_detect(speech.list.in$fulltext[i], endmarks = c("?", ".", "!", "|",";"))
+  if(length(sentences)>0){
+    word.count=word_count(sentences)
+    sentence.list=rbind(sentence.list, 
+                        cbind(speech.list.in[i,-ncol(speech.list.in)],sentences=as.character(sentences), word.count,sent.id=1:length(sentences))
+    )
+  }
+}
+write.csv(sentence.list, file = "MySentenceList.csv")
+sentence.list=sentence.list%>%filter(!is.na(word.count))
+
+
+
+
+From the histogram we can see the distribution of blue color and green color have almost the same shape. The red color has less word in each sentence. However, in general, they have the same length. 
+
+Up to this point, we have our data available.We will use sentences and words as building blocks fo the analysis.
+The purpose of the report is to summarize and compare the topic of each president (George W Bush,Barack Obama Donald Trump).After getting their topics we may can compare similarities and differences. 
